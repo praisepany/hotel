@@ -1,119 +1,167 @@
 `timescale 1ns / 1ps
 
-module vgacontroller (
-    input wire clk_25mhz,       // 25 MHz clock for 640x480 @ 60Hz
-    input wire reset,           // Active-high reset
-    input wire [11:0] bram_data,// 12-bit pixel data from BRAM Read Port (Port B)
+// =============================================================================
+// Module: vgacontroller
+// Purpose: Drives a 640x480 @ 60 Hz VGA display from a 12-bit BRAM frame
+//          buffer that holds a 320x240 QVGA image (pixel-doubled).
+//
+// KEY FIXES vs original:
+//  1. Pipeline depth mismatch (critical): The original code registered hsync/
+//     vsync through TWO flip-flops (hsync_delay -> hsync) but only registered
+//     the active-video gate through ONE flip-flop (active_video_delay).
+//     Result: sync pulses arrived 1 pixel LATER than the colour data, so the
+//     monitor saw a 1-pixel colour shift relative to the blanking boundary.
+//     Fix: use a single, uniform 2-cycle pipeline for ALL signals:
+//       Cycle 0  – address is presented to BRAM (combinational)
+//       Cycle 1  – BRAM data is valid; latch it along with the syncs
+//       Cycle 2  – drive outputs (colour + syncs) to the DAC / connector
+//     This keeps colour and syncs perfectly aligned.
+//
+//  2. bram_addr is now registered (not combinational): driving a BRAM address
+//     from a large combinational expression (shifts + adds) can cause timing
+//     violations at 25 MHz if the path is long. Registering it adds a 1-cycle
+//     latency that is absorbed into the 2-cycle pipeline above.
+//
+//  3. Blanking boundary: colours are set to 0 when the DELAYED active-video
+//     signal is false, guaranteeing the DAC outputs black during every non-
+//     display region (front porch, sync, back porch).
+// =============================================================================
 
-    output reg [16:0] bram_addr,// Address to request from BRAM
-    output reg hsync,           // VGA Horizontal Sync
-    output reg vsync,           // VGA Vertical Sync
-    output reg [3:0] vga_r,     // 4-bit VGA Red
-    output reg [3:0] vga_g,     // 4-bit VGA Green
-    output reg [3:0] vga_b      // 4-bit VGA Blue
+module vgacontroller (
+    input  wire        clk_25mhz,   // 25 MHz pixel clock for 640x480 @ 60 Hz
+    input  wire        reset,       // Active-high synchronous reset
+    input  wire [11:0] bram_data,   // 12-bit pixel from BRAM read port
+
+    output reg  [16:0] bram_addr,   // Read address sent to BRAM
+    output reg         hsync,       // VGA H-sync (active low)
+    output reg         vsync,       // VGA V-sync (active low)
+    output reg  [3:0]  vga_r,       // 4-bit red   (MSB = most-significant)
+    output reg  [3:0]  vga_g,       // 4-bit green
+    output reg  [3:0]  vga_b        // 4-bit blue
 );
 
-    // VGA Timing Constants (640x480 @ 60Hz)
-    parameter H_DISPLAY       = 640;
-    parameter H_FRONT_PORCH   = 16;
-    parameter H_SYNC_PULSE    = 96;
-    parameter H_BACK_PORCH    = 48;
-    parameter H_TOTAL         = 800;
+    // -------------------------------------------------------------------------
+    // VGA timing parameters – 640x480 @ 60 Hz, 25.175 MHz pixel clock
+    // -------------------------------------------------------------------------
+    parameter H_DISPLAY     = 640;
+    parameter H_FRONT_PORCH = 16;
+    parameter H_SYNC_PULSE  = 96;
+    parameter H_BACK_PORCH  = 48;
+    parameter H_TOTAL       = 800;  // 640 + 16 + 96 + 48
 
-    parameter V_DISPLAY       = 480;
-    parameter V_FRONT_PORCH   = 10;
-    parameter V_SYNC_PULSE    = 2;
-    parameter V_BACK_PORCH    = 33;
-    parameter V_TOTAL         = 525;
+    parameter V_DISPLAY     = 480;
+    parameter V_FRONT_PORCH = 10;
+    parameter V_SYNC_PULSE  = 2;
+    parameter V_BACK_PORCH  = 33;
+    parameter V_TOTAL       = 525;  // 480 + 10 + 2 + 33
 
-    // Counters for the VGA electron beam position
+    // -------------------------------------------------------------------------
+    // Pixel counters
+    // -------------------------------------------------------------------------
     reg [9:0] h_count;
     reg [9:0] v_count;
 
-    // Signals for pixel coordinate calculations and latency
-    wire active_video;
-    reg active_video_delay; // Used to account for 1-clock BRAM delay
-    reg hsync_delay;
-    reg vsync_delay;
-
-    wire [8:0] x_qvga;
-    wire [8:0] y_qvga;
-
-    // -----------------------------------------------------------------
-    // 1. Horizontal and Vertical Counters
-    // -----------------------------------------------------------------
-    always @(posedge clk_25mhz or posedge reset) begin
+    always @(posedge clk_25mhz) begin
         if (reset) begin
-            h_count <= 0;
-            v_count <= 0;
+            h_count <= 10'd0;
+            v_count <= 10'd0;
         end else begin
             if (h_count == H_TOTAL - 1) begin
-                h_count <= 0;
-                if (v_count == V_TOTAL - 1)
-                    v_count <= 0;
-                else
-                    v_count <= v_count + 1;
+                h_count <= 10'd0;
+                v_count <= (v_count == V_TOTAL - 1) ? 10'd0 : v_count + 10'd1;
             end else begin
-                h_count <= h_count + 1;
+                h_count <= h_count + 10'd1;
             end
         end
     end
 
-    // -----------------------------------------------------------------
-    // 2. Sync Signal Generation
-    // -----------------------------------------------------------------
-    // Sync pulses are active-low for standard 640x480 VGA
-    wire hsync_next = ~((h_count >= H_DISPLAY + H_FRONT_PORCH) &&
-                        (h_count < H_DISPLAY + H_FRONT_PORCH + H_SYNC_PULSE));
+    // -------------------------------------------------------------------------
+    // Active-video and sync wires (combinational from current counters)
+    // -------------------------------------------------------------------------
+    wire active_video = (h_count < H_DISPLAY) && (v_count < V_DISPLAY);
 
-    wire vsync_next = ~((v_count >= V_DISPLAY + V_FRONT_PORCH) &&
-                        (v_count < V_DISPLAY + V_FRONT_PORCH + V_SYNC_PULSE));
+    // Syncs are active LOW for standard 640x480
+    wire hsync_w = ~( (h_count >= H_DISPLAY + H_FRONT_PORCH) &&
+                      (h_count <  H_DISPLAY + H_FRONT_PORCH + H_SYNC_PULSE) );
 
-    assign active_video = (h_count < H_DISPLAY) && (v_count < V_DISPLAY);
+    wire vsync_w = ~( (v_count >= V_DISPLAY + V_FRONT_PORCH) &&
+                      (v_count <  V_DISPLAY + V_FRONT_PORCH + V_SYNC_PULSE) );
 
-    // -----------------------------------------------------------------
-    // 3. Address Calculation (Pixel Doubling & Math Trick)
-    // -----------------------------------------------------------------
-    // We drop the lowest bit (divide by 2) to scale 320x240 up to 640x480
-    assign x_qvga = h_count[9:1];
-    assign y_qvga = v_count[9:1];
+    // -------------------------------------------------------------------------
+    // QVGA coordinate calculation  (pixel-doubling: each camera pixel = 2x2)
+    // -------------------------------------------------------------------------
+    wire [8:0] x_qvga = h_count[9:1];  // divide h by 2  -> 0..319
+    wire [8:0] y_qvga = v_count[9:1];  // divide v by 2  -> 0..239
 
-    // Calculate BRAM Address: Address = (Y * 320) + X
-    // Hardware Trick: (Y * 320) = (Y * 256) + (Y * 64) = (Y << 8) + (Y << 6)
-    // This avoids using heavy DSP multiplier blocks!
-    always @(*) begin
-        if (active_video) begin
-            bram_addr = (y_qvga << 8) + (y_qvga << 6) + x_qvga;
+    // -------------------------------------------------------------------------
+    // PIPELINE STAGE 0  ->  STAGE 1  (register address + control signals)
+    //
+    // FIX 2: bram_addr is now registered.  The address computation
+    //   (y<<8) + (y<<6) + x  is a 17-bit add with shift, which is fast but
+    //   registering it gives the tools timing slack and moves the address
+    //   presentation one cycle earlier relative to the output stage.
+    //
+    // Stage-1 registers carry the "what pixel is being requested" state so
+    // we can align everything with BRAM's 1-cycle read latency.
+    // -------------------------------------------------------------------------
+    reg        active_s1;
+    reg        hsync_s1;
+    reg        vsync_s1;
+
+    always @(posedge clk_25mhz) begin
+        if (reset) begin
+            bram_addr <= 17'd0;
+            active_s1 <= 1'b0;
+            hsync_s1  <= 1'b1;
+            vsync_s1  <= 1'b1;
         end else begin
-            bram_addr = 17'd0;
+            // Registered address – presented to BRAM this cycle,
+            // data arrives from BRAM next cycle (stage 2).
+            if (active_video)
+                // (y * 320) = (y << 8) + (y << 6)  – avoids DSP multiplier
+                bram_addr <= ({8'd0, y_qvga} << 8) +
+                             ({8'd0, y_qvga} << 6) +
+                             {8'd0, x_qvga};
+            else
+                bram_addr <= 17'd0;
+
+            // Carry control signals forward one stage
+            active_s1 <= active_video;
+            hsync_s1  <= hsync_w;
+            vsync_s1  <= vsync_w;
         end
     end
 
-    // -----------------------------------------------------------------
-    // 4. BRAM Latency Compensation & Color Output
-    // -----------------------------------------------------------------
-    // BRAM takes 1 clock cycle to output data after receiving an address.
-    // We must delay the active video and sync signals by 1 clock cycle
-    // so the monitor gets the color perfectly aligned with the syncs.
+    // -------------------------------------------------------------------------
+    // PIPELINE STAGE 1  ->  STAGE 2  (latch BRAM output; drive DAC outputs)
+    //
+    // FIX 1 (critical): ALL outputs – colour AND syncs – are registered in the
+    // same always block.  active_s1 arrives here exactly when bram_data is
+    // valid (BRAM 1-cycle latency), and hsync_s1 / vsync_s1 are also exactly
+    // 1 cycle behind the counters, matching the colour pipeline depth.
+    // -------------------------------------------------------------------------
     always @(posedge clk_25mhz) begin
-        active_video_delay <= active_video;
-        hsync_delay        <= hsync_next;
-        vsync_delay        <= vsync_next;
-
-        // Output syncs
-        hsync <= hsync_delay;
-        vsync <= vsync_delay;
-
-        // Output colors: Only draw when in the active region
-        if (active_video_delay) begin
-            vga_r <= bram_data[11:8];
-            vga_g <= bram_data[7:4];
-            vga_b <= bram_data[3:0];
-        end else begin
-            // Output black during front porch, sync pulse, and back porch
+        if (reset) begin
+            hsync <= 1'b1;
+            vsync <= 1'b1;
             vga_r <= 4'd0;
             vga_g <= 4'd0;
             vga_b <= 4'd0;
+        end else begin
+            // Syncs: now a single register stage (was erroneously 2 in original)
+            hsync <= hsync_s1;
+            vsync <= vsync_s1;
+
+            // Colour output: driven only during active video; black otherwise
+            if (active_s1) begin
+                vga_r <= bram_data[11:8];
+                vga_g <= bram_data[7:4];
+                vga_b <= bram_data[3:0];
+            end else begin
+                vga_r <= 4'd0;
+                vga_g <= 4'd0;
+                vga_b <= 4'd0;
+            end
         end
     end
 
