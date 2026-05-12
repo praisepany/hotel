@@ -1,8 +1,7 @@
 `timescale 1ns / 1ps
 
-module vgacontroller (
+module vga_640x320_display (
     input wire clk_25mhz,       // 25 MHz clock for 640x480 @ 60Hz
-    input wire reset,           // Active-high reset
     input wire [11:0] bram_data,// 12-bit pixel data from BRAM Read Port (Port B)
 
     output reg [16:0] bram_addr,// Address to request from BRAM
@@ -39,29 +38,6 @@ module vgacontroller (
     wire [8:0] x_qvga;
     wire [8:0] y_qvga;
 
-    // -----------------------------------------------------------------
-    // 1. Horizontal and Vertical Counters
-    // -----------------------------------------------------------------
-    always @(posedge clk_25mhz or posedge reset) begin
-        if (reset) begin
-            h_count <= 0;
-            v_count <= 0;
-        end else begin
-            if (h_count == H_TOTAL - 1) begin
-                h_count <= 0;
-                if (v_count == V_TOTAL - 1)
-                    v_count <= 0;
-                else
-                    v_count <= v_count + 1;
-            end else begin
-                h_count <= h_count + 1;
-            end
-        end
-    end
-
-    // -----------------------------------------------------------------
-    // 2. Sync Signal Generation
-    // -----------------------------------------------------------------
     // Sync pulses are active-low for standard 640x480 VGA
     wire hsync_next = ~((h_count >= H_DISPLAY + H_FRONT_PORCH) &&
                         (h_count < H_DISPLAY + H_FRONT_PORCH + H_SYNC_PULSE));
@@ -71,15 +47,12 @@ module vgacontroller (
 
     assign active_video = (h_count < H_DISPLAY) && (v_count < V_DISPLAY);
 
-    // -----------------------------------------------------------------
-    // 3. Address Calculation (Pixel Doubling & Math Trick)
-    // -----------------------------------------------------------------
     // We drop the lowest bit (divide by 2) to scale 320x240 up to 640x480
-    assign x_qvga = h_count[9:1];
-    assign y_qvga = v_count[9:1];
+    assign x_qvga = h_count >> 1;
+    assign y_qvga = v_count >> 1;
 
-    // Calculate BRAM Address: Address = (Y * 320) + X
-    // Hardware Trick: (Y * 320) = (Y * 256) + (Y * 64) = (Y << 8) + (Y << 6)
+    // Address = (Y * 320) + X
+    // (Y * 320) = (Y * 256) + (Y * 64) = (Y << 8) + (Y << 6)
     // This avoids using heavy DSP multiplier blocks!
     always @(*) begin
         if (active_video) begin
@@ -89,13 +62,19 @@ module vgacontroller (
         end
     end
 
-    // -----------------------------------------------------------------
-    // 4. BRAM Latency Compensation & Color Output
-    // -----------------------------------------------------------------
     // BRAM takes 1 clock cycle to output data after receiving an address.
     // We must delay the active video and sync signals by 1 clock cycle
     // so the monitor gets the color perfectly aligned with the syncs.
     always @(posedge clk_25mhz) begin
+        if (h_count == H_TOTAL - 1) begin
+            h_count <= 0;
+            if (v_count == V_TOTAL - 1)
+                v_count <= 0;
+            else
+                v_count <= v_count + 1;
+        end else begin
+            h_count <= h_count + 1;
+        end
         active_video_delay <= active_video;
         hsync_delay        <= hsync_next;
         vsync_delay        <= vsync_next;
