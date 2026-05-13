@@ -43,7 +43,7 @@ module cameraCapture(
             end else begin
                 if (y[0] == 0 && x[0] == 0 && addr < 76800) begin
                     data_out <= {red, green, blue};
-                    we <= 1; // we <= 1
+                    we <= 1;
                     addr <= addr + 1;
                 end else begin
                     we <= 0;

@@ -37,13 +37,13 @@ module top(
         .clk_out2(clk_24m)
     );
 
-    sccb_config config_inst (
+    sccb config_inst (
         .clk(clk_25m),
         .sioc(ov7670_sioc),
         .siod(ov7670_siod)
     );
 
-    camera_capture_640x320 capture_inst (
+    cameraCapture capture_inst (
         .pclk(ov7670_pclk),
         .href(ov7670_href),
         .vsync(ov7670_vsync),
@@ -63,7 +63,7 @@ module top(
         .doutb(pixel_from_bram)
     );
 
-    vga_640x320_display vga_inst (
+    vga vga_inst (
         .clk_25mhz(clk_25m),
         .bram_data(pixel_from_bram),
         .bram_addr(addrb),
