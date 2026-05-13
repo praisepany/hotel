@@ -1,15 +1,15 @@
 `timescale 1ns / 1ps
 
 module vga (
-    input wire clk_25mhz,       // 25 MHz clock for 640x480 @ 60Hz
-    input wire [11:0] bram_data,// 12-bit pixel data from BRAM Read Port (Port B)
+    input wire clk_25mhz,
+    input wire [11:0] bram_data,
 
-    output reg [16:0] bram_addr,// Address to request from BRAM
-    output reg hsync,           // VGA Horizontal Sync
-    output reg vsync,           // VGA Vertical Sync
-    output reg [3:0] vga_r,     // 4-bit VGA Red
-    output reg [3:0] vga_g,     // 4-bit VGA Green
-    output reg [3:0] vga_b      // 4-bit VGA Blue
+    output reg [16:0] bram_addr,
+    output reg hsync,
+    output reg vsync,
+    output reg [3:0] vga_r,
+    output reg [3:0] vga_g,
+    output reg [3:0] vga_b
 );
 
     // VGA Timing Constants (640x480 @ 60Hz)
@@ -25,20 +25,17 @@ module vga (
     parameter V_BACK_PORCH    = 33;
     parameter V_TOTAL         = 525;
 
-    // Counters for the VGA electron beam position
     reg [9:0] h_count;
     reg [9:0] v_count;
 
-    // Signals for pixel coordinate calculations and latency
     wire active_video;
-    reg active_video_delay; // Used to account for 1-clock BRAM delay
+    reg active_video_delay;
     reg hsync_delay;
     reg vsync_delay;
 
     wire [8:0] x_qvga;
     wire [8:0] y_qvga;
 
-    // Sync pulses are active-low for standard 640x480 VGA
     wire hsync_next = ~((h_count >= H_DISPLAY + H_FRONT_PORCH) &&
                         (h_count < H_DISPLAY + H_FRONT_PORCH + H_SYNC_PULSE));
 
@@ -53,7 +50,6 @@ module vga (
 
     // Address = (Y * 320) + X
     // (Y * 320) = (Y * 256) + (Y * 64) = (Y << 8) + (Y << 6)
-    // This avoids using heavy DSP multiplier blocks!
     always @(*) begin
         if (active_video) begin
             bram_addr = (y_qvga << 8) + (y_qvga << 6) + x_qvga;
