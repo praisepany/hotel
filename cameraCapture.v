@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 
-module camera_capture_640x320(
+module cameraCapture(
     input pclk,
     input href,
     input vsync,

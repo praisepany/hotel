@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 
-module top_module(
+module top(
     input clk_100mhz,
     input reset,
     input [4:0] sw,

@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 
-module vga_640x320_display (
+module vga (
     input wire clk_25mhz,       // 25 MHz clock for 640x480 @ 60Hz
     input wire [11:0] bram_data,// 12-bit pixel data from BRAM Read Port (Port B)
 
