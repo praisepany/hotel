@@ -101,7 +101,7 @@ module top(
             end
             5'b00010: begin //Green color isolation filter
                 if ((g_raw > r_raw + 2) && (g_raw > b_raw + 2)) begin
-                    vga_r = rr_rawaw_r;
+                    vga_r = r_raw;
                     vga_g = g_raw;
                     vga_b = b_raw;
                 end else begin
