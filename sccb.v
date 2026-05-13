@@ -1,3 +1,5 @@
+`timescale 1ns / 1ps
+
 module sccb(
     input  wire clk,     // 25MHz Master Clock
     output wire sioc,    // SCCB Clock

@@ -42,39 +42,7 @@ module cameraCapture(
                 byte_state <= 1;
             end else begin
                 if (y[0] == 0 && x[0] == 0 && addr < 76800) begin
-                    // if ((red > green) && (red > blue)) begin
-                    //     if (red == 4'd15) begin
-                    //         data_out <= {red, green, blue};
-                    //     end else if (red == 4'd14) begin
-                    //         //data_out <= {red + 4'd1, green, blue};
-                    //         data_out <= {red, green, blue};
-                    //     end else begin
-                    //         //data_out <= {red + 4'd2, green, blue};
-                    //         data_out <= {red, green, blue};
-                    //     end
-                    // end else if ((green > red) && (green > blue)) begin
-                    //     if (red == 4'd15) begin
-                    //         data_out <= {red, green, blue};
-                    //     end else if (red == 4'd14) begin
-                    //         //data_out <= {red, green + 4'd1, blue};
-                    //         data_out <= {red, green, blue};
-                    //     end else begin
-                    //         //data_out <= {red, green + 4'd2, blue};
-                    //         data_out <= {red, green, blue};
-                    //     end
-                    // end else if ((blue > red) && (blue > green)) begin
-                    //     if (red == 4'd15) begin
-                    //         data_out <= {red, green, blue};
-                    //     end else if (red == 4'd14) begin
-                    //         //data_out <= {red, green, blue + 4'd1};
-                    //         data_out <= {red, green, blue};
-                    //     end else begin
-                    //         //data_out <= {red, green, blue + 4'd2};
-                    //         data_out <= {red, green, blue};
-                    //     end
-                    // end else begin
                     data_out <= {red, green, blue};
-                    // end
                     we <= 1; // we <= 1
                     addr <= addr + 1;
                 end else begin
