@@ -13,7 +13,7 @@ module top(
     output ov7670_xclk,
     output ov7670_pwdn,
     output ov7670_rst,
-    output reg [3:0] vga_r, vga_g, vga_b,
+    output [3:0] vga_r, vga_g, vga_b,
     output vga_hsync,
     output vga_vsync
 );
@@ -29,7 +29,6 @@ module top(
     wire we;
 
     wire [3:0] r_raw, g_raw, b_raw;
-    wire [3:0] gray;
 
     clk_wiz_0 clock_gen (
         .clk_in1(clk_100mhz),
@@ -74,75 +73,19 @@ module top(
         .vga_b(b_raw)
     );
 
+    filter filter_inst (
+        .clk_25m(clk_25m),
+        .sw(sw),
+        .r_raw(r_raw),
+        .g_raw(g_raw),
+        .b_raw(b_raw),
+        .r_filtered(vga_r),
+        .g_filtered(vga_g),
+        .b_filtered(vga_b)
+    );
+
     assign ov7670_xclk = clk_24m;
     assign ov7670_pwdn = 1'b0;
     assign ov7670_rst  = 1'b1;
 
-    //Calculate gray pixel
-    assign gray = (r_raw * 5 + g_raw * 9 + b_raw * 2) >> 4;
-
-    always @(posedge clk_25m) begin
-        case (sw[4:0])
-            5'b00000: begin //No filter
-                vga_r = r_raw;
-                vga_g = g_raw;
-                vga_b = b_raw;
-            end
-            5'b00001: begin //Red color isolation filter
-                if ((r_raw > g_raw + 2) && (r_raw > b_raw + 2)) begin
-                    vga_r = r_raw;
-                    vga_g = g_raw;
-                    vga_b = b_raw;
-                end else begin
-                    vga_r = gray;
-                    vga_g = gray;
-                    vga_b = gray;
-                end
-            end
-            5'b00010: begin //Green color isolation filter
-                if ((g_raw > r_raw + 2) && (g_raw > b_raw + 2)) begin
-                    vga_r = r_raw;
-                    vga_g = g_raw;
-                    vga_b = b_raw;
-                end else begin
-                    vga_r = gray;
-                    vga_g = gray;
-                    vga_b = gray;
-                end
-            end
-            5'b00100: begin //Blue color isolation filter
-                if ((b_raw > r_raw) && (b_raw > g_raw - 1)) begin
-                    vga_r = r_raw;
-                    vga_g = g_raw;
-                    vga_b = b_raw;
-                end else begin
-                    vga_r = gray;
-                    vga_g = gray;
-                    vga_b = gray;
-                end
-            end
-            5'b01000: begin //Grayscale filter
-                vga_r = gray;
-                vga_g = gray;
-                vga_b = gray;
-            end
-            5'b10000: begin //Thresholding filter
-                if (gray > 4'd8) begin
-                    vga_r = 4'hF;
-                    vga_g = 4'hF;
-                    vga_b = 4'hF;
-                end
-                else begin
-                    vga_r = 4'h0;
-                    vga_g = 4'h0;
-                    vga_b = 4'h0;
-                end
-            end
-            default: begin //Black screen when turning more than one switch on
-                vga_r = 4'h0;
-                vga_g = 4'h0;
-                vga_b = 4'h0;
-            end
-        endcase
-    end
 endmodule
